@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+
+<title>Маниакальный веблог » Разъяснения Рассела</title>
+
+<link rel="stylesheet" href="/media/style/style.css?1338513606">
+
+<link rel="stylesheet" href="http://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700">
+<link rel="icon" href="/media/style/icon.png">
+<script src="/media/js/jquery-1.3.2.min.js?1338513606"></script>
+<link rel="openid.server" href="http://softwaremaniacs.org/openid/endpoint/"><link rel="openid.delegate" href="http://softwaremaniacs.org/about/">
+
+  <script src="/media/js/highlight.pack.js?1338883551"></script>
+  <script src="/media/js/core.js?1338513606"></script>
+  <script src="/media/js/marcus.js?1338513606"></script>
+  <link rel="pingback" href="http://softwaremaniacs.org/blog/pingback/">
+  <link rel="me" type="text/html" href="http://www.google.com/profiles/isagalaev">
+
+  <link rel="alternate" type="application/atom+xml" title=" » комментарии" href="/blog/2011/10/14/russel-on-wsgi-and-model-validation/feed/">
+
+
+<body id="post" class="blog">
+
+<div id="header">
+  <h1>Разъяснения Рассела</h1>
+  
+<div id="meta" class="meta">
+  <p>
+    <a href="/blog/">Маниакальный веблог</a>,
+    
+    14.10.2011
+    
+    
+  </p>
+</div>
+
+</div>
+
+
+<div id="entry" class="usertext">
+<p>В недавнем посте с интервью с Джанго-разработчиками  меня <a href=http://softwaremaniacs.org/blog/2011/10/03/core-devs-on-future/#comment-99080 rel=nofollow>попросили уточнить, что имел в виду Рассел Кит-Маги, говоря про WSGI и валидацию моделей</a>.  У меня и у самого эти два пункты вызывали недопонимание, поэтому я попросил его их разъяснить.</p>
+
+<p>Вот перевод его ответа:</p>
+
+<p><a name=more rel=nofollow></a></p>
+
+<blockquote>
+  <p>Так, первый пункт: WSGI на самом деле хорошо заточен под классическую задачу "показать целиком веб-страницу". Он был спроектирован как самый простой рабочий "наименьший общий делитель" — фактически Питоний вариант CGI. То есть он очень хорошо спроектирован для веба 1995 года, но не настолько хорошо для веба 2011, с его long polling'ом и другими вкусными push-технологиями и серверными плюшками, которые теперь используются повсеместно. Многие уже написали гораздо подробней и об этой проблеме, и о WSGI вообще:</p>
+  
+  <ul>
+  <li><a href=http://lucumr.pocoo.org/2011/7/27/the-pluggable-pipedream/ rel=nofollow>http://lucumr.pocoo.org/2011/7/27/the-pluggable-pipedream/</a></li>
+  <li><a href=http://www.b-list.org/weblog/2009/aug/10/wsgi/ rel=nofollow>http://www.b-list.org/weblog/2009/aug/10/wsgi/</a></li>
+  </ul>
+  
+  <p>На самом деле, это не обязательно является проблемой самой Джанго — она использует WSGI всего лишь как API для общения с сервером. Можно использовать любой другой интерфейс, если он кем-то специфицирован. Например, Джанго поддерживает fcgi и mod_python — последний хоть и устарел, но показывает, что метод, который используется для запуска Джанго не зависит от Джанго, как библиотеки по обслуживанию веб-запросов.</p>
+  
+  <p>Я также должен заметить, что на WSGI тоже <em>возможно</em> реализовать long poll и другие push-технологии, просто это спецификация не обязательно лучше всего подходит для таких нужд.</p>
+  
+  <p>Касаемо второго вопроса — я не имел в виду, что валидация в моделях "плоха" сама по себе. Просто одно из мест API модельной валидации получился уродливым исключительно из соображений обратной совместимости.</p>
+  
+  <p>Корень проблемы в том, что <code>Model.full_clean()</code> не вызывается автоматически при вызове <code>save()</code>. Мы не могли так сделать, потому что после апгрейда на Джанго 1.2 (релиз, в котором появилась валидация моделей) код, который до этого работал, стал бы выкидывать всевозможные ошибки валидации.</p>
+  
+  <p>Это, в свою очередь, привело к проблемам с <code>ModelForm</code> и валидацией уникальности. <a href=https://docs.djangoproject.com/en/1.1/topics/forms/modelforms/#overriding-the-clean-method rel=nofollow>Документация по <code>ModelForm</code></a> явно утверждает, что уникальность проверяется в <code>clean()</code> базового класса, и что вы должны вызывать унаследованный <code>clean()</code>, если вам она нужна. Это вместе с тем означает, что пользователь может решить <em>не</em> проверять уникальность, определив метод <code>clean()</code> так, чтобы он не вызывал родительский класс. Включив вызов <code>Model.full_clean()</code> в <code>ModelForm.full_clean()</code>, мы бы изменили это явно задокументированное поведение.</p>
+  
+  <p>Теперь это является источником путаницы: здравый смысл подсказывает, то модели должны валидироваться при сохранении, и модельный формы должны делать всю валидацию, какую могут. И так бы мы и сделали, если бы начинали с чистого листа. Но нам нужно поддерживать старый код, поэтому мы теперь имеем эту кривость.</p>
+  
+  <p>Это случай, пожалуй, единственный, который приходит мне в голову, где политика обратной совместимости Джанго стала серьёзным препятствием прогрессу. Во всех остальных случаях, которые я помню, у нас получалось вводить изменения посредством обычного двухшагового цикла релизов, даже когда мы делали значительные изменения, как например синтаксис тега <code>{% url %}</code>.</p>
+  
+  <p>Russ %-)</p>
+</blockquote>
+
+<p>От себя добавлю, что если у кого будут ещё вопросы к Расселу, то лучше напишите сразу ему, чтобы я не был испорченным телефоном :-). Я же могу, если что, разъяснить свою позицию.</p>
+
+
+</div>
+<address id="author" class="meta hidden"><a href="/about/">Иван Сагалаев</a></address>
+
+
+
+<div id="comments">
+  <h2 id="commentsheader">
+    Комментарии: 2
+    
+    <small><a href="/blog/2011/10/14/russel-on-wsgi-and-model-validation/feed/" class="feed"><img src="/media/style/feed.png" alt="(feed)"></a></small>
+  </h2>
+
+  <ol id="commentslist">
+    
+    <li id="comment-101148" class="comment ">
+      <div class="meta">
+        <address class="author">
+        
+          <a href="http://s-chistovich.ya.ru/" rel="nofollow" class="openid_link url">s-chistovich</a>
+          
+        
+        
+        </address>
+        
+        
+      </div>
+
+      <div class="usertext">
+        
+        <p>Ваня, не надо использовать слово "касаемо". Это просторечие, и гнусное.</p>
+
+        
+      </div>
+    </li>
+    
+    <li id="comment-101177" class="comment master">
+      <div class="meta">
+        <address class="author">
+        
+          <a href="http://softwaremaniacs.org/about/" rel="nofollow" class="openid_link url">Ivan Sagalaev</a>
+          
+        
+        
+        </address>
+        
+        
+      </div>
+
+      <div class="usertext">
+        
+        <p>Я предпочитаю руководствоваться собственным чувством вкуса в каждом конкретном случае, нежели догматическими правилами :-). Язык живой и меняется. Давай звук "ё" перестанем употреблять на основании того, что он в екатерининские времена был несомненным признаком просторечия.</p>
+
+        
+      </div>
+    </li>
+    
+
+    
+
+  </ol>
+</div>
+
+
+
+<div id="add_comment">
+  <h2>Добавить комментарий</h2>
+  
+  <form action="/blog/2011/10/14/russel-on-wsgi-and-model-validation/#add_comment" method="post" id="commentform">
+    
+    <p>
+      <label for="id_name">Имя или OpenID</label>
+      <input type="text" name="name" id="id_name" />
+      
+    
+    
+      <input type="hidden" name="language" value="ru" id="id_language" />
+    
+    <div id="preview">
+      <p><label>Предпросмотр</label>
+      <div class="usertext"></div>
+    </div>
+    <p id="legend"><img src="/media/style/markdown-legend.png" alt="Текст через пустую строку превращается в отдельные абзацы, цитата отделяется символами &gt; слева, список состоит из пунктов с дефисом слева, курсив выделяется * с каждой стороны, жирный - двойными **, блоки кода отступают слева на 4 пробела"></p>
+    <p>
+      <label for="id_text">Текст</label>
+      <textarea id="id_text" rows="20" cols="80" name="text"></textarea>
+      
+    <p style="position: absolute; left: -1000px;">
+      <label>Это поле — ловушка для роботов, оставьте его пустым</label>
+      <input type="text" name="email" value="" tabindex="-1" autocomplete="off">
+
+    <div class="buttons"><button type="submit">Отправить</button></div>
+  </form>
+</div>
+
+
+
+
+<!-- Yandex.Metrika -->
+<script src="//mc.yandex.ru/metrika/watch.js" type="text/javascript"></script>
+<div style="display:none;"><script type="text/javascript">
+try { var yaCounter1199159 = new Ya.Metrika(1199159); } catch(e){}
+</script></div>
+<noscript><div style="position:absolute"><img src="//mc.yandex.ru/watch/1199159" alt="" /></div></noscript>
+<!-- /Yandex.Metrika -->
+
